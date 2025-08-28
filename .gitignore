@@ -1,0 +1,47 @@
+# Dependencias
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+logs
+*.log
+*.tmp
+*.pid
+*.seed
+*.pid.lock
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Entorno
+.env
+.env.local
+.env.*.local
+
+# Compilados / caches
+dist/
+build/
+.cache/
+.next/
+out/
+
+# Cobertura de tests
+coverage/
+.nyc_output/
+
+# Uploads locales (no versionar fotos en el repo)
+uploads/
+
+# IDEs / Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.swp
+
+# Docker
+docker-compose.override.yml
