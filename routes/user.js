@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 const pool = require('../db'); // tu conexión a la BD
+const fs = require("fs");
 
 
 const storage = multer.diskStorage({
@@ -19,7 +20,11 @@ const upload = multer({ storage });
 // ✅ Obtener todos los usuarios
 router.get('/', async (req, res) => {
     try {
-        const result = await pool.query('SELECT id, state, name, age, description, phone, photos FROM "users" ORDER BY id ASC');
+        const { userId, limit = 5, offset = 0 } = req.query; // valores por defecto
+        const result = await pool.query(
+            'SELECT id, state, name, age, description, phone, photos FROM "users" WHERE id != $1 ORDER BY id ASC LIMIT $2 OFFSET $3',
+            [userId, limit, offset]
+        );
         res.json(result.rows);
     } catch (err) {
         console.error(err.message);
@@ -97,6 +102,49 @@ router.post('/upload/photos/:id', upload.single('photo'), async (req, res) => {
         console.error(err);
         res.status(500).json({ error: 'Error al subir la foto' });
     }
+});
+
+router.delete("/delete/photos/:id", async (req, res) => {
+  const { id } = req.params;
+  const { photo } = req.body;
+
+  try {
+    // Sacar el path relativo (/uploads/12345.jpg)
+    const relativePath = photo.replace("http://localhost:3000", "");
+    const absolutePath = path.join(__dirname, "..", relativePath);
+
+    // 1️⃣ Actualizar la BD (quitar la foto del array JSONB)
+    const result = await pool.query(
+      `
+      UPDATE users
+      SET photos = (
+        SELECT jsonb_agg(elem)
+        FROM jsonb_array_elements(photos) elem
+        WHERE elem <> $1::jsonb
+      )
+      WHERE id = $2
+      RETURNING photos
+      `,
+      [JSON.stringify(relativePath), id]
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    // 2️⃣ Eliminar físicamente el archivo
+    fs.unlink(absolutePath, (err) => {
+      if (err) {
+        console.error("⚠️ Error eliminando archivo:", err.message);
+        // No detenemos el flujo, porque ya quitamos la referencia en la BD
+      }
+    });
+
+    res.json({ message: "Foto eliminada con éxito", photos: result.rows[0].photos });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error eliminando foto" });
+  }
 });
 
 // ✅ Actualizar un usuario
