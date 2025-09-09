@@ -18,7 +18,7 @@ router.post('/login', async (req, res) => {
     const norm = normalizePhone(phone);
 
     const result = await pool.query(
-      `SELECT id, state, name, birthdate, description, phone, photos, password, type, gender 
+      `SELECT id, state, name, birthdate, description, phone, password, type, gender 
        FROM users 
        WHERE phone = $1 
        LIMIT 1`,
@@ -39,7 +39,15 @@ router.post('/login', async (req, res) => {
     // remove password before returning
     delete user.password;
 
-    return res.json({ success: true, user });
+    return res.status(201).json(
+      {
+        success: true,
+        status: 201,
+        message: 'El usuario ha sido registrado',
+        details: 'Usuarios registrado existosamente',
+        content: user
+      }
+    );
   } catch (err) {
     console.error('❌ Error in /login:', err);
     res.status(500).json({ message: 'Internal server error' });
@@ -58,13 +66,11 @@ router.post('/register', async (req, res) => {
       name,
       birthdate,
       description,
-      photos,
-      type = 'USER',
-      gender = null
+      gender = null,
+      type = 'USER'
     } = req.body;
-
-    if (!phone || !password || !name || !birthdate || !type) {
-      return res.status(400).json({ message: 'phone, password, name and birthdate are required' });
+    if (!phone || !password || !name || !birthdate || !type || gender === null) {
+      return res.status(400).json({ message: 'El celular, nombre, fecha de nacimiento y el genero son obligatorios' });
     }
 
     const norm = normalizePhone(phone);
@@ -75,14 +81,14 @@ router.post('/register', async (req, res) => {
       [norm]
     );
     if (exists.rows.length > 0) {
-      return res.status(409).json({ message: 'Phone already registered' });
+      return res.status(409).json({ message: 'Este numero de celular ya esta registrado' });
     }
 
     // Insert user
     const insertQuery = `
-      INSERT INTO users (state, name, birthdate, description, phone, photos, password, type, gender)
-      VALUES (TRUE, $1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, state, name, birthdate, description, phone, photos, type, gender, create_date, update_date
+      INSERT INTO users (state, name, birthdate, description, phone, password, type, gender)
+      VALUES (TRUE, $1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, state, name, birthdate, description, phone, type, gender, create_date, update_date
     `;
 
     const result = await pool.query(insertQuery, [
@@ -90,13 +96,20 @@ router.post('/register', async (req, res) => {
       birthdate,
       description ?? null,
       norm,
-      photos ? JSON.stringify(photos) : null, // ensure JSON format
       hashPassword(password),
       type,
       gender
     ]);
 
-    return res.status(201).json({ success: true, user: result.rows[0] });
+    return res.status(201).json(
+      {
+        success: true,
+        status: 201,
+        message: 'El usuario ha sido registrado',
+        details: 'Usuarios registrado existosamente',
+        content: result.rows[0]
+      }
+    );
   } catch (err) {
     console.error('❌ Error in /register:', err);
     res.status(500).json({ message: 'Internal server error' });

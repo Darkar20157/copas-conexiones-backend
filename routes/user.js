@@ -6,12 +6,12 @@ const pool = require('../db');
 const fs = require("fs");
 
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, "uploads/");
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname));
-    },
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
+  },
 });
 
 const upload = multer({ storage });
@@ -27,7 +27,7 @@ router.get("/", async (req, res) => {
 
     // 🔹 Traer usuarios con los que no se ha reaccionado aún
     const query = `
-      SELECT u.id, u.state, u.name, u.age, u.description, u.phone, u.photos, u.type
+      SELECT u.id, u.state, u.name, u.birthdate, u.description, u.phone, u.photos, u.type
       FROM "users" u
       WHERE u.id != $1
         AND u.id NOT IN (
@@ -54,47 +54,53 @@ router.get("/", async (req, res) => {
 
 // ✅ Obtener un usuario por ID
 router.get('/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-        const result = await pool.query(
-            'SELECT id, state, name, age, description, phone, photos, type FROM "users" WHERE id = $1',
-            [id]
-        );
-        console.log(result)
-        if (result.rows.length === 0) {
-            return res.status(404).json({ message: 'Usuario no encontrado' });
-        }
-        res.json(result.rows[0]);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ error: 'Error obteniendo usuario' });
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'SELECT id, state, name, birthdate, description, phone, photos, gender, type FROM "users" WHERE id = $1',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
     }
+    return res.status(200).json(
+      {
+        success: true,
+        status: 200,
+        message: 'Usuario encontrado',
+        details: 'Usuario encontrado existosamente',
+        content: result.rows[0]
+      }
+    );
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: 'Error obteniendo usuario' });
+  }
 });
 
 // ✅ Crear un usuario
 router.post('/', async (req, res) => {
-    const { name, email, password, type = "USER" } = req.body;
-    try {
-        console.log(type);
-        const result = await pool.query(
-            'INSERT INTO "users" (name, email, password, type) VALUES ($1, $2, $3, $4) RETURNING *',
-            [name, email, password, type]
-        );
-        res.status(201).json(result.rows[0]);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ error: 'Error creando usuario' });
-    }
+  const { name, email, password, gender, birthdate, type = "USER" } = req.body;
+  try {
+    const result = await pool.query(
+      'INSERT INTO "users" (name, email, password, type, gender, birthdate) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [name, email, password, type, gender, birthdate]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: 'Error creando usuario' });
+  }
 });
 
 // ✅ Subir foto de usuario
 router.post('/upload/photos/:id', upload.single('photo'), async (req, res) => {
-    try {
-        const userId = req.params.id;
-        const filePath = `/uploads/${req.file.filename}`;
+  try {
+    const userId = req.params.id;
+    const filePath = `/uploads/${req.file.filename}`;
 
-        const result = await pool.query(
-            `
+    const result = await pool.query(
+      `
       UPDATE users 
       SET photos = 
         CASE 
@@ -105,23 +111,23 @@ router.post('/upload/photos/:id', upload.single('photo'), async (req, res) => {
       WHERE id = $2
       RETURNING photos, type
       `,
-            [JSON.stringify([filePath]), userId]
-        );
+      [JSON.stringify([filePath]), userId]
+    );
 
-        if (!result.rows[0]) {
-            return res.status(404).json({ error: 'Usuario no encontrado' });
-        }
-
-        const photos = result.rows[0].photos;
-        if (photos.length > 6) {
-            return res.status(400).json({ error: 'Máximo 6 fotos permitidas' });
-        }
-
-        res.json({ message: 'Foto agregada con éxito', photos, type: result.rows[0].type });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Error al subir la foto' });
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
     }
+
+    const photos = result.rows[0].photos;
+    if (photos.length > 6) {
+      return res.status(400).json({ error: 'Máximo 6 fotos permitidas' });
+    }
+
+    res.json({ message: 'Foto agregada con éxito', photos, type: result.rows[0].type });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al subir la foto' });
+  }
 });
 
 // ✅ Eliminar foto
@@ -166,39 +172,39 @@ router.delete("/delete/photos/:id", async (req, res) => {
 
 // ✅ Actualizar un usuario
 router.put('/:id', async (req, res) => {
-    const { id } = req.params;
-    const { name, age, description, type } = req.body;
-    try {
-        const result = await pool.query(
-            'UPDATE "users" SET name=$1, age=$2, description=$3, type=COALESCE($4, type) WHERE id=$5 RETURNING *',
-            [name, age, description, type, id]
-        );
-        if (result.rows.length === 0) {
-            return res.status(404).json({ message: 'Usuario no encontrado' });
-        }
-        res.json(result.rows[0]);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ error: 'Error actualizando usuario' });
+  const { id } = req.params;
+  const { name, birthdate, description, type } = req.body;
+  try {
+    const result = await pool.query(
+      'UPDATE "users" SET name=$1, birthdate=$2, description=$3, type=COALESCE($4, type) WHERE id=$5 RETURNING *',
+      [name, birthdate, description, type, id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
     }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: 'Error actualizando usuario' });
+  }
 });
 
 // ✅ Eliminar un usuario
 router.delete('/:id', async (req, res) => {
-    const { id } = req.params;
-    try {
-        const result = await pool.query(
-            'DELETE FROM "users" WHERE id=$1 RETURNING id, type',
-            [id]
-        );
-        if (result.rows.length === 0) {
-            return res.status(404).json({ message: 'Usuario no encontrado' });
-        }
-        res.json({ message: 'Usuario eliminado correctamente', type: result.rows[0].type });
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ error: 'Error eliminando usuario' });
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'DELETE FROM "users" WHERE id=$1 RETURNING id, type',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
     }
+    res.json({ message: 'Usuario eliminado correctamente', type: result.rows[0].type });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: 'Error eliminando usuario' });
+  }
 });
 
 module.exports = router;
