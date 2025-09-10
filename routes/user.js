@@ -16,6 +16,50 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
+
+// ✅ Obtener usuarios disponibles para hacer match
+// GET http://localhost:3000/api/users/available?userId=1&limit=10&offset=0
+
+router.get("/available", async (req, res) => {
+  try {
+    const { userId, limit = 5, offset = 0 } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: "El userId es requerido" });
+    }
+
+    const query = `
+      SELECT u.id, u.state, u.name, u.birthdate, u.description, u.phone, u.photos, u.gender, u.type
+      FROM "users" u
+      WHERE u.id != $1
+        AND u.state = TRUE
+        AND u.type = 'USER'
+        -- No mostrar si ya reaccionó
+        AND NOT EXISTS (
+          SELECT 1 
+          FROM likes l
+          WHERE l.sender_id = $1 AND l.receiver_id = u.id
+        )
+      ORDER BY u.id ASC
+      LIMIT $2 OFFSET $3
+    `;
+
+    const result = await pool.query(query, [userId, limit, offset]);
+
+    res.status(200).json({
+      success: true,
+      status: 200,
+      message: "Usuarios disponibles encontrados",
+      details: "Usuarios que aún no tienen reacción con este usuario",
+      content: result.rows
+    });
+  } catch (err) {
+    console.error("Error obteniendo usuarios disponibles:", err);
+    res.status(500).json({ error: "Error obteniendo usuarios disponibles" });
+  }
+});
+
+
 // ✅ Obtener todos los usuarios
 router.get("/", async (req, res) => {
   try {
@@ -51,6 +95,8 @@ router.get("/", async (req, res) => {
     res.status(500).json({ error: "Error obteniendo usuarios" });
   }
 });
+
+
 
 // ✅ Obtener un usuario por ID
 router.get('/:id', async (req, res) => {
