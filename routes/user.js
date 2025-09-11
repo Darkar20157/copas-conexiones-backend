@@ -19,7 +19,6 @@ const upload = multer({ storage });
 
 // ✅ Obtener usuarios disponibles para hacer match
 // GET http://localhost:3000/api/users/available?userId=1&limit=10&offset=0
-
 router.get("/available", async (req, res) => {
   try {
     const { userId, limit = 5, offset = 0 } = req.query;
