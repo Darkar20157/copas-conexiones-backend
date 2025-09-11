@@ -140,4 +140,50 @@ router.post("/react", async (req, res) => {
   }
 });
 
+router.patch("/:id", async (req, res) => {
+  const { id } = req.params;
+  const { view_admin } = req.body;
+
+  if (typeof view_admin !== "boolean") {
+    return res.status(400).json({
+      success: false,
+      status: 400,
+      message: "El campo view_admin es requerido y debe ser boolean",
+    });
+  }
+
+  try {
+    const query = `
+      UPDATE matches
+      SET view_admin = $1, update_date = NOW()
+      WHERE id = $2
+      RETURNING *;
+    `;
+
+    const result = await pool.query(query, [view_admin, id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        status: 404,
+        message: "Match no encontrado",
+      });
+    }
+
+    res.json({
+      success: true,
+      status: 200,
+      message: "Estado actualizado correctamente",
+      content: result.rows[0],
+    });
+  } catch (err) {
+    console.error("Error al actualizar view_admin:", err);
+    res.status(500).json({
+      success: false,
+      status: 500,
+      message: "Error en el servidor",
+    });
+  }
+});
+
 module.exports = router;
