@@ -181,21 +181,28 @@ router.delete("/delete/photos/:id", async (req, res) => {
   const { photo } = req.body;
 
   try {
-    const relativePath = photo.replace("http://localhost:3000", "");
+    // Normalizar ruta eliminando dominio y dejando solo /uploads/...
+    const relativePath = photo
+      .replace(/^https?:\/\/[^/]+/, "") // quita dominio (ej: https://api.planesbyiss.com)
+      .replace(/^\//, ""); // quita la barra inicial para evitar doble slash en path
+
     const absolutePath = path.join(__dirname, "..", relativePath);
 
     const result = await pool.query(
       `
       UPDATE users
-      SET photos = (
-        SELECT jsonb_agg(elem)
-        FROM jsonb_array_elements(photos) elem
-        WHERE elem <> $1::jsonb
+      SET photos = COALESCE(
+        (
+          SELECT jsonb_agg(elem)
+          FROM jsonb_array_elements(photos) elem
+          WHERE elem <> $1::jsonb
+        ),
+        '[]'::jsonb
       )
       WHERE id = $2
       RETURNING photos, type
       `,
-      [JSON.stringify(relativePath), id]
+      [JSON.stringify("/" + relativePath), id]
     );
 
     if (!result.rows[0]) {
@@ -208,7 +215,11 @@ router.delete("/delete/photos/:id", async (req, res) => {
       }
     });
 
-    res.json({ message: "Foto eliminada con éxito", photos: result.rows[0].photos, type: result.rows[0].type });
+    res.json({
+      message: "Foto eliminada con éxito",
+      photos: result.rows[0].photos,
+      type: result.rows[0].type
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error eliminando foto" });
