@@ -190,4 +190,63 @@ router.patch("/:id", async (req, res) => {
   }
 });
 
+
+// Obtener matches de un usuario con blur/revelado según view_admin
+router.get("/user/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const { page = 0, limit = 10 } = req.query;
+  const offset = parseInt(page) * parseInt(limit);
+
+  try {
+    const query = `
+      SELECT 
+          m.id AS match_id,
+          m.state,
+          m.create_date,
+          m.update_date,
+          m.view_admin,
+
+          CASE 
+              WHEN m.user1_id = $1 THEN m.user2_id
+              ELSE m.user1_id
+          END AS other_user_id,
+
+          u.name AS match_name,
+          u.photos AS match_photos,
+          u.gender,
+          u.birthdate,
+          u.description
+
+      FROM matches m
+      JOIN users u 
+        ON (u.id = m.user1_id AND m.user2_id = $1) 
+        OR (u.id = m.user2_id AND m.user1_id = $1)
+      WHERE m.state = TRUE
+      ORDER BY m.create_date DESC
+      LIMIT $2 OFFSET $3;
+    `;
+
+    const result = await pool.query(query, [userId, limit, offset]);
+
+    res.json({
+      success: true,
+      status: 200,
+      message: "Matches obtenidos con éxito",
+      content: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: result.rowCount,
+        data: result.rows,
+      },
+    });
+  } catch (err) {
+    console.error("Error al obtener matches con blur:", err);
+    res.status(500).json({
+      success: false,
+      status: 500,
+      message: "Error en el servidor",
+    });
+  }
+});
+
 module.exports = router;
