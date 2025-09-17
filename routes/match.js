@@ -22,6 +22,8 @@ router.get("/", async (req, res) => {
         u1.phone AS user1_phone,
         u1.photos AS user1_photos,
         u1.birthdate AS user1_birthdate,
+        u1.gender AS user1_gender,
+        u1.description AS user1_description,
 
         -- Datos user2
         u2.id AS user2_id,
@@ -29,6 +31,8 @@ router.get("/", async (req, res) => {
         u2.phone AS user2_phone,
         u2.photos AS user2_photos,
         u2.birthdate AS user2_birthdate,
+        u2.gender AS user2_gender,
+        u2.description AS user2_description,
 
         -- Reacciones
         l1.reaction_type AS user1_reaction,
