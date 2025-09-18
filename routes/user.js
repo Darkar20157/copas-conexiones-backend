@@ -1,21 +1,99 @@
 const express = require('express');
+const sharp = require('sharp');
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 const pool = require('../db');
 const fs = require("fs");
 
+// Crear directorios necesarios al iniciar
+const createDirectories = () => {
+  const tempDir = path.join(__dirname, '..', 'temp');
+  const uploadsDir = path.join(__dirname, '..', 'uploads');
+  
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+    console.log('📁 Directorio temp creado');
+  }
+  
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log('📁 Directorio uploads creado');
+  }
+};
+
+// Crear directorios al cargar el módulo
+createDirectories();
+
+// Configuración temporal de multer (archivos se procesan y eliminan)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, "uploads/");
+    cb(null, "temp/"); // Carpeta temporal
   },
   filename: (req, file, cb) => {
     cb(null, Date.now() + path.extname(file.originalname));
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({ 
+  storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50MB límite temporal
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Solo se permiten imágenes'));
+    }
+  }
+});
 
+// Función para asegurar que existe la carpeta del usuario
+const ensureUserDirectory = (userId) => {
+  const userDir = path.join(__dirname, '..', 'uploads', userId.toString());
+  if (!fs.existsSync(userDir)) {
+    fs.mkdirSync(userDir, { recursive: true });
+  }
+  return userDir;
+};
+
+// Función segura para eliminar archivos
+const safeUnlink = (filePath) => {
+  return new Promise((resolve) => {
+    fs.unlink(filePath, (err) => {
+      if (err && err.code !== 'ENOENT') {
+        console.error('⚠️ Error eliminando archivo:', err.message);
+      }
+      resolve(); // Siempre resolver, no importa si hay error
+    });
+  });
+};
+
+// Función para convertir imagen a WebP
+const convertToWebP = async (inputPath, outputPath, quality = 80) => {
+  try {
+    await sharp(inputPath)
+      .resize(1920, 1080, {
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+      .webp({ quality })
+      .toFile(outputPath);
+    
+    // Eliminar archivo original después de la conversión (de forma segura)
+    await safeUnlink(inputPath);
+    return true;
+  } catch (error) {
+    console.error('Error convirtiendo a WebP:', error);
+    // Intentar limpiar archivo temporal si existe
+    if (fs.existsSync(inputPath)) {
+      await safeUnlink(inputPath);
+    }
+    return false;
+  }
+};
 
 // ✅ Obtener usuarios disponibles para hacer match
 // GET http://localhost:3000/api/users/available?userId=1&limit=10&offset=0
@@ -58,7 +136,6 @@ router.get("/available", async (req, res) => {
   }
 });
 
-
 // ✅ Obtener todos los usuarios
 router.get("/", async (req, res) => {
   try {
@@ -94,8 +171,6 @@ router.get("/", async (req, res) => {
     res.status(500).json({ error: "Error obteniendo usuarios" });
   }
 });
-
-
 
 // ✅ Obtener un usuario por ID
 router.get('/:id', async (req, res) => {
@@ -138,11 +213,51 @@ router.post('/', async (req, res) => {
   }
 });
 
-// ✅ Subir foto de usuario
+// ✅ Subir foto de usuario (ACTUALIZADO CON WEBP)
 router.post('/upload/photos/:id', upload.single('photo'), async (req, res) => {
   try {
     const userId = req.params.id;
-    const filePath = `/uploads/${req.file.filename}`;
+    
+    if (!req.file) {
+      return res.status(400).json({ error: 'No se subió ningún archivo' });
+    }
+
+    // Verificar límite de fotos antes de procesar
+    const currentUser = await pool.query('SELECT photos FROM users WHERE id = $1', [userId]);
+    if (!currentUser.rows[0]) {
+      // Eliminar archivo subido ya que no se va a usar
+      if (fs.existsSync(req.file.path)) {
+        await safeUnlink(req.file.path);
+      }
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    const currentPhotos = currentUser.rows[0].photos || [];
+    if (currentPhotos.length >= 6) {
+      // Eliminar archivo subido ya que no se va a usar
+      if (fs.existsSync(req.file.path)) {
+        await safeUnlink(req.file.path);
+      }
+      return res.status(400).json({ error: 'Máximo 6 fotos permitidas' });
+    }
+
+    // Crear directorio del usuario si no existe
+    const userDir = ensureUserDirectory(userId);
+    
+    // Generar nombre único para el archivo WebP
+    const timestamp = Date.now();
+    const webpFileName = `${timestamp}.webp`;
+    const webpPath = path.join(userDir, webpFileName);
+    
+    // Convertir a WebP
+    const conversionSuccess = await convertToWebP(req.file.path, webpPath, 80);
+    
+    if (!conversionSuccess) {
+      return res.status(500).json({ error: 'Error procesando la imagen' });
+    }
+
+    // Ruta relativa para almacenar en BD
+    const relativePath = `/uploads/${userId}/${webpFileName}`;
 
     const result = await pool.query(
       `
@@ -156,35 +271,46 @@ router.post('/upload/photos/:id', upload.single('photo'), async (req, res) => {
       WHERE id = $2
       RETURNING photos, type
       `,
-      [JSON.stringify([filePath]), userId]
+      [JSON.stringify([relativePath]), userId]
     );
 
     if (!result.rows[0]) {
+      // Si falla la BD, eliminar el archivo WebP creado
+      if (fs.existsSync(webpPath)) {
+        await safeUnlink(webpPath);
+      }
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
     const photos = result.rows[0].photos;
-    if (photos.length > 6) {
-      return res.status(400).json({ error: 'Máximo 6 fotos permitidas' });
-    }
+    res.json({ 
+      message: 'Foto agregada con éxito', 
+      photos, 
+      type: result.rows[0].type 
+    });
 
-    res.json({ message: 'Foto agregada con éxito', photos, type: result.rows[0].type });
   } catch (err) {
-    console.error(err);
+    console.error('Error subiendo foto:', err);
+    
+    // Limpiar archivos en caso de error
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
     res.status(500).json({ error: 'Error al subir la foto' });
   }
 });
 
-// ✅ Eliminar foto
+// ✅ Eliminar foto (ACTUALIZADO)
 router.delete("/delete/photos/:id", async (req, res) => {
   const { id } = req.params;
   const { photo } = req.body;
 
   try {
-    // Normalizar ruta eliminando dominio y dejando solo /uploads/...
+    // Normalizar ruta eliminando dominio
     const relativePath = photo
-      .replace(/^https?:\/\/[^/]+/, "") // quita dominio (ej: https://api.planesbyiss.com)
-      .replace(/^\//, ""); // quita la barra inicial para evitar doble slash en path
+      .replace(/^https?:\/\/[^/]+/, "") // quita dominio
+      .replace(/^\//, ""); // quita la barra inicial
 
     const absolutePath = path.join(__dirname, "..", relativePath);
 
@@ -209,9 +335,12 @@ router.delete("/delete/photos/:id", async (req, res) => {
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
+    // Eliminar archivo físico
     fs.unlink(absolutePath, (err) => {
       if (err) {
         console.error("⚠️ Error eliminando archivo:", err.message);
+      } else {
+        console.log("✅ Archivo eliminado:", absolutePath);
       }
     });
 
@@ -220,8 +349,9 @@ router.delete("/delete/photos/:id", async (req, res) => {
       photos: result.rows[0].photos,
       type: result.rows[0].type
     });
+
   } catch (err) {
-    console.error(err);
+    console.error('Error eliminando foto:', err);
     res.status(500).json({ error: "Error eliminando foto" });
   }
 });
@@ -262,5 +392,34 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ error: 'Error eliminando usuario' });
   }
 });
+
+// ✅ Función utilitaria para limpiar carpetas vacías (opcional)
+const cleanEmptyUserDirectories = () => {
+  const uploadsDir = path.join(__dirname, '..', 'uploads');
+  
+  if (!fs.existsSync(uploadsDir)) return;
+  
+  try {
+    const userDirs = fs.readdirSync(uploadsDir);
+    
+    userDirs.forEach(dir => {
+      const userDirPath = path.join(uploadsDir, dir);
+      const stat = fs.statSync(userDirPath);
+      
+      if (stat.isDirectory()) {
+        const files = fs.readdirSync(userDirPath);
+        if (files.length === 0) {
+          fs.rmdirSync(userDirPath);
+          console.log(`🗑️ Carpeta vacía eliminada: ${dir}`);
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error limpiando directorios:', error);
+  }
+};
+
+// Ejecutar limpieza cada hora (opcional)
+setInterval(cleanEmptyUserDirectories, 60 * 60 * 1000);
 
 module.exports = router;
